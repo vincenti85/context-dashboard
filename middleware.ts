@@ -6,9 +6,10 @@ import { NextRequest, NextResponse } from "next/server";
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Allow login page and static assets
+  // Allow login page, login API, and static assets
   if (
     pathname === "/login" ||
+    pathname.startsWith("/api/login") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon")
   ) {
