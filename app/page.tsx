@@ -1,12 +1,18 @@
 // app/page.tsx — Overview dashboard.
 
-import { getOverviewStats, getDrafts } from "./actions";
+import { getOverviewStats, getDrafts, getDeadJobs, getNextContentIdeas } from "./actions";
 import { OverviewCards } from "@/components/OverviewCards";
+import { JobsPanel } from "@/components/JobsPanel";
+import { NextContentIdeas } from "@/components/NextContentIdeas";
 import Link from "next/link";
 
 export default async function OverviewPage() {
-  const stats = await getOverviewStats();
-  const recentDrafts = await getDrafts();
+  const [stats, recentDrafts, deadJobs, ideas] = await Promise.all([
+    getOverviewStats(),
+    getDrafts(),
+    getDeadJobs(),
+    getNextContentIdeas(),
+  ]);
 
   return (
     <div className="space-y-8">
@@ -16,6 +22,10 @@ export default async function OverviewPage() {
           콘텐츠 패키지 생성 현황
         </p>
       </div>
+
+      <JobsPanel jobs={deadJobs} />
+
+      <NextContentIdeas ideas={ideas} />
 
       <OverviewCards
         total={stats.total}

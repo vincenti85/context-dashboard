@@ -7,7 +7,50 @@ import {
   parseAiOverrides,
   serializeAiOverrides,
   buildExportFilename,
+  extractSectionChunk,
+  stripHeaderLine,
 } from "@/lib/export";
+
+describe("stripHeaderLine", () => {
+  it("removes the leading ## header line, keeping only the body", () => {
+    const chunk = "## 9. 쇼츠 재가공 스크립트\n\n쇼츠 본문 내용\n둘째 줄\n";
+    expect(stripHeaderLine(chunk)).toBe("쇼츠 본문 내용\n둘째 줄");
+  });
+
+  it("handles a chunk with no trailing content after the header", () => {
+    expect(stripHeaderLine("## Empty Section\n")).toBe("");
+  });
+});
+
+describe("extractSectionChunk", () => {
+  const doc = `# Title
+
+## 1. 콘텐츠 브리프
+
+brief body
+
+## 2. 유튜브 제목 후보
+
+1. Title one
+2. Title two
+
+## 3. 썸네일 문구 후보
+
+thumbnail body
+`;
+
+  it("extracts the chunk starting at the matching ## header through the next header", () => {
+    const chunk = extractSectionChunk(doc, "2. 유튜브 제목 후보");
+    expect(chunk).toBeDefined();
+    expect(chunk).toContain("## 2. 유튜브 제목 후보");
+    expect(chunk).toContain("Title one");
+    expect(chunk).not.toContain("thumbnail body");
+  });
+
+  it("returns undefined when the header does not exist", () => {
+    expect(extractSectionChunk(doc, "존재하지 않는 섹션")).toBeUndefined();
+  });
+});
 
 // B1 structural validation is tested indirectly via the header extraction logic.
 // The aiImprove function's validateStructure is internal, but we can test

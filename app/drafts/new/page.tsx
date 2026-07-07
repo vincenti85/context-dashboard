@@ -2,13 +2,28 @@
 
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createDraft } from "@/app/actions";
 
+// useSearchParams() requires a Suspense boundary (Next.js App Router).
 export default function NewDraftPage() {
+  return (
+    <Suspense>
+      <NewDraftForm />
+    </Suspense>
+  );
+}
+
+function NewDraftForm() {
+  const searchParams = useSearchParams();
+  // Prefill from a performance-fed suggestion (C1 — NextContentIdeas "새 드래프트로" link).
+  const idea = searchParams.get("idea");
+
   const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
+  const [content, setContent] = useState(
+    idea ? `# 콘텐츠 메모\n\n## 주제\n\n${idea}\n\n## 타겟 시청자\n\n\n\n## 핵심 메시지\n\n\n\n## 다룰 포인트\n\n- \n- \n- ` : "",
+  );
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 

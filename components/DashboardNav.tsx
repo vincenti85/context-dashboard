@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const NAV_ITEMS = [
   { href: "/", label: "개요" },
   { href: "/drafts", label: "드래프트" },
+  { href: "/settings", label: "설정" },
 ];
 
 export function DashboardNav() {

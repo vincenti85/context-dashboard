@@ -6,9 +6,11 @@ import { DraftList } from "@/components/DraftList";
 export default async function DraftsPage({
   searchParams,
 }: {
-  searchParams: { status?: string };
+  // Next.js 15: searchParams is a Promise (async dynamic APIs).
+  searchParams: Promise<{ status?: string }>;
 }) {
-  const status = searchParams.status || "all";
+  const { status: statusParam } = await searchParams;
+  const status = statusParam || "all";
   const draftList = await getDrafts(status === "all" ? undefined : status);
 
   return (

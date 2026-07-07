@@ -44,6 +44,30 @@ export function assembleDocument(
 }
 
 /**
+ * Extract a single "## <headerText>" chunk (header line + its body, up to but
+ * not including the next "## " header) from a baseline document. Shared by
+ * app/actions.ts (manual AI improve) and lib/jobs/aiImproveSection.ts /
+ * lib/jobs/scoreTitles.ts (auto pipeline) so the split logic exists in one place.
+ */
+export function extractSectionChunk(markdown: string, headerText: string): string | undefined {
+  const chunks = markdown.split(/^(?=##\s)/m);
+  return chunks.find((chunk) => {
+    const m = chunk.match(/^##\s+(.+?)\s*$/m);
+    return m && m[1].trim() === headerText;
+  });
+}
+
+/**
+ * Strip the leading "## <header>" line from a section chunk, leaving only
+ * the body. Used where the extracted text is staged as literal post content
+ * (e.g. lib/jobs/stagePosts.ts) — the markdown header is a document artifact,
+ * not part of the actual SNS post/script text a user would copy-paste.
+ */
+export function stripHeaderLine(chunk: string): string {
+  return chunk.replace(/^##\s+.*(\r?\n|$)/, "").trim();
+}
+
+/**
  * Build the export filename: YYYY-MM-DD-slug-upload-package.md
  * Reuses the same slugify + date logic as templateGenerate.
  */

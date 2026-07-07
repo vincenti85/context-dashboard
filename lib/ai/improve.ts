@@ -1,15 +1,18 @@
 // lib/ai/improve.ts — aiImprove with B1 structural validation.
-// One section per request (M1: Vercel Hobby 10s constraint).
+// One section per request (Vercel Hobby function-duration constraint).
+// Provider: Gemini (free 1,500 req/day) with Groq fallback (free 1,000 req/day) —
+// see lib/ai/provider.ts. Replaces the earlier direct @ai-sdk/openai call.
 
-import { generateText, generateObject } from "ai";
-import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { numbered } from "@/lib/generator/format";
+import { generateWithFallback, generateObjectWithFallback, AiUnavailableError } from "./provider";
+import { improveSectionPrompt } from "./prompts";
 
 export interface AiImproveResult {
   success: boolean;
   improvedMarkdown?: string;
   error?: string;
+  modelUsed?: string;
 }
 
 /**
@@ -34,7 +37,7 @@ function extractHeaders(markdown: string): string[] {
  * Assert the ordered header-set of the AI response equals the input.
  * On mismatch: return failure (caller records structure_violation, keeps template).
  */
-function validateStructure(
+export function validateStructure(
   inputMarkdown: string,
   outputMarkdown: string,
 ): { valid: boolean; reason?: string } {
@@ -60,37 +63,24 @@ function validateStructure(
   return { valid: true };
 }
 
-const SYSTEM_PROMPT = `당신은 한국어 유튜브 콘텐츠 에디터입니다.
-주어진 섹션의 문장을 더 자연스럽고 구체적으로 개선하되, 다음 규칙을 엄격히 지킵니다:
-1. 모든 ## 및 ### 헤더를 원본 그대로 유지합니다 (추가, 삭제, 이름 변경, 레벨 변경 금지).
-2. 섹션 구조를 변경하지 않습니다.
-3. 한국어로 작성합니다.
-4. 마크다운 형식만 반환합니다.`;
-
 /**
  * Improve a single section's markdown using AI.
- * M1: One section per request (Vercel Hobby 10s constraint).
  * B1: Structural validation on every response.
+ * channelContext: optional block from lib/ai/prompts.ts#channelContextBlock (empty string = none).
  */
 export async function aiImprove(
   sectionKey: string,
   templateSection: string,
+  channelContext = "",
 ): Promise<AiImproveResult> {
   try {
-    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-
     // Special handling for titles/thumbnails (structured output)
     if (sectionKey === "2. 유튜브 제목 후보" || sectionKey === "3. 썸네일 문구 후보") {
-      return await aiImproveTitlesOrThumbnails(sectionKey, templateSection, model);
+      return await aiImproveTitlesOrThumbnails(sectionKey, templateSection, channelContext);
     }
 
-    // Free-text section improvement
-    const { text } = await generateText({
-      model: openai(model),
-      system: SYSTEM_PROMPT,
-      prompt: `다음 섹션을 개선해주세요:\n\n${templateSection}`,
-      maxTokens: 2000,
-    });
+    const { system, prompt } = improveSectionPrompt(sectionKey, templateSection, channelContext);
+    const { text, modelUsed } = await generateWithFallback({ system, prompt, maxOutputTokens: 2000 });
 
     // B1: Validate structural integrity
     const validation = validateStructure(templateSection, text);
@@ -98,47 +88,65 @@ export async function aiImprove(
       return {
         success: false,
         error: `structure_violation: ${validation.reason}`,
+        modelUsed,
       };
     }
 
-    return { success: true, improvedMarkdown: text };
+    return { success: true, improvedMarkdown: text, modelUsed };
   } catch (err) {
     return {
       success: false,
-      error: `api_error: ${err instanceof Error ? err.message : String(err)}`,
+      error: `${err instanceof AiUnavailableError ? "ai_unavailable" : "api_error"}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
     };
   }
 }
 
 /**
  * Titles and thumbnails use generateObject + zod (arrays of exactly 5 strings).
- * Result is re-serialized to numbered markdown via numbered() before storage (L3).
+ * Result is re-serialized to numbered markdown via numbered() before storage.
  */
 async function aiImproveTitlesOrThumbnails(
   sectionKey: string,
   templateSection: string,
-  model: string,
+  channelContext: string,
 ): Promise<AiImproveResult> {
   try {
     const isTitles = sectionKey === "2. 유튜브 제목 후보";
     const label = isTitles ? "제목" : "썸네일 문구";
 
-    const { object } = await generateObject({
-      model: openai(model),
-      system: `당신은 한국어 유튜브 콘텐츠 전략가입니다. 기존 ${label} 후보를 참고하여 더 클릭을 유도하는 5개의 ${label}을 제안합니다.`,
+    const { object, modelUsed } = await generateObjectWithFallback({
+      system: `당신은 한국어 유튜브 콘텐츠 전략가입니다.\n${channelContext}기존 ${label} 후보를 참고하여 더 클릭을 유도하는 5개의 ${label}을 제안합니다. 과장하지 않고, 제목/썸네일/대본이 같은 약속을 전달하도록 합니다.`,
       prompt: `기존 ${label} 후보:\n\n${templateSection}\n\n이것들을 참고하여 더 나은 5개의 ${label}을 작성해주세요.`,
       schema: z.object({
         items: z.array(z.string()).length(5),
       }),
     });
 
-    // Re-serialize to numbered markdown (L3)
-    const improvedMarkdown = `${sectionKey}\n\n${numbered(object.items)}\n`;
-    return { success: true, improvedMarkdown };
+    // Re-serialize to numbered markdown. The override MUST include the "## "
+    // header (schema contract "improved markdown incl. header") so that
+    // assembleDocument's chunk replacement keeps the document structure intact
+    // — fixed in review A001 B-2 (the bare `${sectionKey}` form corrupted the
+    // assembled doc and leaked the header into scoreTitles as a fake title).
+    const improvedMarkdown = `## ${sectionKey}\n\n${numbered(object.items)}\n`;
+
+    const validation = validateStructure(templateSection, improvedMarkdown);
+    if (!validation.valid) {
+      return {
+        success: false,
+        error: `structure_violation: ${validation.reason}`,
+        modelUsed,
+      };
+    }
+
+    return { success: true, improvedMarkdown, modelUsed };
   } catch (err) {
     return {
       success: false,
-      error: `api_error: ${err instanceof Error ? err.message : String(err)}`,
+      error: `${err instanceof AiUnavailableError ? "ai_unavailable" : "api_error"}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
     };
   }
 }

@@ -14,6 +14,10 @@ export interface GeneratorResult {
     topic: string;
     slug: string;
     date: string;
+    /** Only set when the draft explicitly has a "## 타겟 시청자" section (undefined otherwise). */
+    targetAudience?: string;
+    /** Only set when the draft explicitly has a "## 핵심 메시지" section (undefined otherwise). */
+    coreMessage?: string;
   };
 }
 
@@ -115,8 +119,34 @@ export function templateGenerate(
       topic,
       slug,
       date,
+      // Only populated when the draft actually authored these sections —
+      // `target`/`coreMessage` above already have generator-internal fallback
+      // defaults applied, which must NOT be mistaken for user-authored values
+      // (see deriveDraftMetadataUpdate below).
+      targetAudience: targetText ? target : undefined,
+      coreMessage: messageText ? coreMessage : undefined,
     },
   };
+}
+
+/**
+ * Pure mapping from generator meta to the drafts-table fields that should be
+ * updated after a template generation run.
+ *
+ * Bug fixed here (see docs/superpowers/specs/2026-07-05-wp0-baseline-audit.md):
+ * app/actions.ts used to write `result.meta.topic` into BOTH targetAudience
+ * and coreMessage. This helper only ever writes fields the draft actually
+ * specified, and never falls back to topic. When a field is absent, it is
+ * omitted from the returned object entirely so the caller's `db.update(...).set()`
+ * leaves the existing column value untouched (no silent overwrite with a guess).
+ */
+export function deriveDraftMetadataUpdate(
+  meta: GeneratorResult["meta"],
+): { targetAudience?: string; coreMessage?: string } {
+  const update: { targetAudience?: string; coreMessage?: string } = {};
+  if (meta.targetAudience) update.targetAudience = meta.targetAudience;
+  if (meta.coreMessage) update.coreMessage = meta.coreMessage;
+  return update;
 }
 
 /**
