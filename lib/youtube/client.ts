@@ -9,11 +9,42 @@ export const YT_ANALYTICS_BASE = "https://youtubeanalytics.googleapis.com/v2";
 
 export class YoutubeApiError extends Error {
   status?: number;
-  constructor(message: string, status?: number) {
+  /** Google's `error.errors[].reason`, e.g. accessNotConfigured / quotaExceeded / forbidden. */
+  reason?: string;
+  constructor(message: string, status?: number, reason?: string) {
     super(message);
     this.name = "YoutubeApiError";
     this.status = status;
+    this.reason = reason;
   }
+}
+
+interface GoogleApiErrorBody {
+  error?: { message?: string; errors?: Array<{ reason?: string }> };
+}
+
+/**
+ * Google returns a distinct `reason` per 403 cause (API disabled vs key
+ * restricted vs quota) but they all share the same status code. Surfacing the
+ * reason and message turns "403" — which forced guesswork in the 2026-07-22
+ * production run — into an actionable error.
+ */
+async function describeFailure(res: Response, path: string): Promise<YoutubeApiError> {
+  let reason: string | undefined;
+  let detail = "";
+  try {
+    const body = (await res.json()) as GoogleApiErrorBody;
+    reason = body.error?.errors?.[0]?.reason;
+    if (body.error?.message) detail = ` — ${body.error.message}`;
+  } catch {
+    // Non-JSON error body: status alone is all we get.
+  }
+  const reasonPart = reason ? ` (${reason})` : "";
+  return new YoutubeApiError(
+    `YouTube API ${path} failed: ${res.status}${reasonPart}${detail}`,
+    res.status,
+    reason,
+  );
 }
 
 /** API-key-authenticated GET (search.list, videos.list — read-only, no user consent needed). */
@@ -27,7 +58,7 @@ export async function ytApiKey<T>(path: string, params: Record<string, string>):
 
   const res = await fetch(url.toString());
   if (!res.ok) {
-    throw new YoutubeApiError(`YouTube API ${path} failed: ${res.status}`, res.status);
+    throw await describeFailure(res, path);
   }
   return res.json() as Promise<T>;
 }

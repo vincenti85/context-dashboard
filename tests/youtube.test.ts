@@ -94,3 +94,56 @@ describe("fetchKeywordEvidence", () => {
     await expect(fetchKeywordEvidence("anything")).rejects.toBeInstanceOf(YoutubeApiError);
   });
 });
+
+describe("YoutubeApiError — actionable 403 diagnosis", () => {
+  const originalApiKey = process.env.YOUTUBE_API_KEY;
+
+  beforeEach(() => {
+    process.env.YOUTUBE_API_KEY = "test-key";
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    process.env.YOUTUBE_API_KEY = originalApiKey;
+    vi.unstubAllGlobals();
+  });
+
+  it("surfaces Google's error reason so a 403 cause is identifiable", async () => {
+    // The three 403 causes (API disabled / key restricted / quota) share a status
+    // code and are only distinguishable by `reason`.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: {
+              message: "YouTube Data API v3 has not been used in project 123 before or it is disabled.",
+              errors: [{ reason: "accessNotConfigured" }],
+            },
+          }),
+          { status: 403 },
+        ),
+      ),
+    );
+
+    const { fetchKeywordEvidence } = await import("@/lib/youtube/search");
+    const { YoutubeApiError } = await import("@/lib/youtube/client");
+
+    await expect(fetchKeywordEvidence("test")).rejects.toSatisfy((err: unknown) => {
+      expect(err).toBeInstanceOf(YoutubeApiError);
+      const e = err as InstanceType<typeof YoutubeApiError>;
+      expect(e.reason).toBe("accessNotConfigured");
+      expect(e.status).toBe(403);
+      expect(e.message).toContain("accessNotConfigured");
+      expect(e.message).toContain("has not been used in project");
+      return true;
+    });
+  });
+
+  it("still reports a usable error when the body is not JSON", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<html>gateway</html>", { status: 502 })));
+
+    const { fetchKeywordEvidence } = await import("@/lib/youtube/search");
+    await expect(fetchKeywordEvidence("test")).rejects.toThrow(/502/);
+  });
+});
