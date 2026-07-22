@@ -6,7 +6,19 @@
 import { z } from "zod";
 import { numbered } from "@/lib/generator/format";
 import { generateWithFallback, generateObjectWithFallback, AiUnavailableError } from "./provider";
-import { improveSectionPrompt } from "./prompts";
+import { improveSectionPrompt, retryAfterStructureViolationPrompt } from "./prompts";
+
+/**
+ * Output budget per section. Generous on purpose: Gemini 3.x spends part of the
+ * output allowance on internal reasoning, and the old 2,000 left nothing for
+ * the visible answer on the longest section (the shooting script), which came
+ * back empty in the 2026-07-22 production run.
+ */
+const SECTION_OUTPUT_TOKENS = 8000;
+
+function isBlank(text: string | undefined | null): boolean {
+  return !text || text.trim().length === 0;
+}
 
 export interface AiImproveResult {
   success: boolean;
@@ -80,19 +92,62 @@ export async function aiImprove(
     }
 
     const { system, prompt } = improveSectionPrompt(sectionKey, templateSection, channelContext);
-    const { text, modelUsed } = await generateWithFallback({ system, prompt, maxOutputTokens: 2000 });
+    const { text, modelUsed } = await generateWithFallback({
+      system,
+      prompt,
+      maxOutputTokens: SECTION_OUTPUT_TOKENS,
+    });
+
+    if (isBlank(text)) {
+      // Thinking-capable models can spend the whole output budget on reasoning
+      // and return no visible text. Reporting that as a header mismatch (the
+      // old behavior) pointed at the wrong cause entirely.
+      return { success: false, error: "empty_response: model returned no text", modelUsed };
+    }
 
     // B1: Validate structural integrity
     const validation = validateStructure(templateSection, text);
-    if (!validation.valid) {
+    if (validation.valid) {
+      return { success: true, improvedMarkdown: text, modelUsed };
+    }
+
+    // One corrective retry: long multi-heading sections (the shooting script in
+    // particular) come back as prose often enough that a single reminder with
+    // the violation quoted is worth the extra call. Never more than one — a
+    // second failure keeps the template baseline, which is the design contract.
+    const retry = retryAfterStructureViolationPrompt(
+      templateSection,
+      channelContext,
+      validation.reason ?? "헤더 구조 불일치",
+    );
+    const retryResult = await generateWithFallback({
+      system: retry.system,
+      prompt: retry.prompt,
+      maxOutputTokens: SECTION_OUTPUT_TOKENS,
+    });
+
+    if (isBlank(retryResult.text)) {
       return {
         success: false,
-        error: `structure_violation: ${validation.reason}`,
-        modelUsed,
+        error: "empty_response: model returned no text on corrective retry",
+        modelUsed: retryResult.modelUsed,
       };
     }
 
-    return { success: true, improvedMarkdown: text, modelUsed };
+    const retryValidation = validateStructure(templateSection, retryResult.text);
+    if (!retryValidation.valid) {
+      return {
+        success: false,
+        error: `structure_violation: ${retryValidation.reason} (corrective retry also failed)`,
+        modelUsed: retryResult.modelUsed,
+      };
+    }
+
+    return {
+      success: true,
+      improvedMarkdown: retryResult.text,
+      modelUsed: retryResult.modelUsed,
+    };
   } catch (err) {
     return {
       success: false,

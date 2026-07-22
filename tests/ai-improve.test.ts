@@ -131,3 +131,96 @@ describe("aiImprove — free-text path structural validation still enforced", ()
     expect(result.improvedMarkdown).toContain("개선된 설명란 본문");
   });
 });
+
+describe("aiImprove — long-section robustness (script section failure, 2026-07-22 prod run)", () => {
+  const SCRIPT_SECTION = `## 6. 촬영용 대본
+
+### Hook
+
+훅 본문
+
+### 오프닝
+
+오프닝 본문
+
+### 문제 제기
+
+문제 제기 본문
+
+### 핵심 개념
+
+핵심 개념 본문
+
+### 실습 또는 예시
+
+실습 본문
+
+### 정리/CTA
+
+정리 본문
+`;
+
+  beforeEach(() => {
+    generateWithFallbackMock.mockReset();
+  });
+
+  it("reports an empty model response distinctly, not as a bogus header mismatch", async () => {
+    // A thinking model that spends its whole output budget on reasoning returns
+    // empty text. Calling that "header count mismatch: 0" hides the real cause.
+    generateWithFallbackMock.mockResolvedValue({ text: "   \n  ", modelUsed: "gemini-3.5-flash" });
+    const { aiImprove } = await import("@/lib/ai/improve");
+
+    const result = await aiImprove("6. 촬영용 대본", SCRIPT_SECTION);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/^empty_response/);
+  });
+
+  it("retries once with corrective feedback when the first response drops the headers", async () => {
+    generateWithFallbackMock
+      .mockResolvedValueOnce({ text: "헤더 없이 산문으로만 쓴 응답", modelUsed: "gemini-3.5-flash" })
+      .mockResolvedValueOnce({ text: SCRIPT_SECTION, modelUsed: "gemini-3.5-flash" });
+    const { aiImprove } = await import("@/lib/ai/improve");
+
+    const result = await aiImprove("6. 촬영용 대본", SCRIPT_SECTION);
+
+    expect(generateWithFallbackMock).toHaveBeenCalledTimes(2);
+    expect(result.success).toBe(true);
+  });
+
+  it("gives up after the corrective retry also fails (no infinite retry)", async () => {
+    generateWithFallbackMock.mockResolvedValue({ text: "여전히 헤더 없음", modelUsed: "gemini-3.5-flash" });
+    const { aiImprove } = await import("@/lib/ai/improve");
+
+    const result = await aiImprove("6. 촬영용 대본", SCRIPT_SECTION);
+
+    expect(generateWithFallbackMock).toHaveBeenCalledTimes(2);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/^structure_violation/);
+  });
+
+  it("requests enough output budget for a long section to survive thinking-token overhead", async () => {
+    generateWithFallbackMock.mockResolvedValue({ text: SCRIPT_SECTION, modelUsed: "gemini-3.5-flash" });
+    const { aiImprove } = await import("@/lib/ai/improve");
+
+    await aiImprove("6. 촬영용 대본", SCRIPT_SECTION);
+
+    const callArgs = generateWithFallbackMock.mock.calls[0][0];
+    expect(callArgs.maxOutputTokens).toBeGreaterThanOrEqual(8000);
+  });
+});
+
+describe("improveSectionPrompt — explicit header contract", () => {
+  it("enumerates the exact headers the response must reproduce", async () => {
+    const { improveSectionPrompt } = await import("@/lib/ai/prompts");
+    const section = "## 6. 촬영용 대본\n\n### Hook\n\n본문\n\n### 오프닝\n\n본문\n";
+
+    const { system, prompt } = improveSectionPrompt("6. 촬영용 대본", section, "");
+    const combined = `${system}\n${prompt}`;
+
+    // Listing them verbatim is what stops a long section being rewritten as prose.
+    expect(combined).toContain("## 6. 촬영용 대본");
+    expect(combined).toContain("### Hook");
+    expect(combined).toContain("### 오프닝");
+  });
+});
