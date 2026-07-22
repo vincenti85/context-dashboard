@@ -63,6 +63,14 @@ export async function handleKeywordSnapshot(
       // Permanent config/permission failures: skip the evidence and let the
       // package generate without it. Transient failures rethrow to be retried.
       if (!isPermanentYoutubeError(err)) throw err;
+      // Skipping silently would leave an empty evidence tab with no explanation
+      // anywhere — the job is marked completed, so the error never reaches the
+      // jobs table. Log it so the cause is recoverable from the runtime logs.
+      console.warn(
+        `[keyword_snapshot] skipped for draft ${draftId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
     }
   }
 
