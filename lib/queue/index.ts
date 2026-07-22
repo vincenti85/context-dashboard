@@ -11,6 +11,7 @@ import { sql, eq } from "drizzle-orm";
 import { waitUntil } from "@vercel/functions";
 import { db } from "@/db/client";
 import { jobs, drafts, type Job } from "@/db/schema";
+import { AUTO_IMPROVE_SECTIONS } from "@/lib/ai/prompts";
 import type { JobType, JobPayloadMap } from "./types";
 
 const STALE_LOCK_MINUTES = 5;
@@ -126,22 +127,16 @@ export async function failJob(id: number, error: string): Promise<void> {
       await enqueue("notify", { draftId, kind: "pipeline_failed", failedJobType: job.jobType });
     }
 
-    // Chain succession (A001 M-2): a dead ai_improve_section carries the
-    // pipeline's `remaining` list with it. Without this, one permanently
-    // failing section would silently kill every later stage (remaining
-    // sections, score_titles, stage_posts, package_ready notify). Partial
-    // success is the design contract (§4) — skip the dead section and let
-    // the rest of the pipeline finish.
-    if (job.jobType === "ai_improve_section" && draftId !== null) {
-      const remaining = Array.isArray(job.payload.remaining)
-        ? (job.payload.remaining as string[])
-        : [];
-      if (remaining.length > 0) {
-        const [next, ...rest] = remaining;
-        await enqueue("ai_improve_section", { draftId, sectionKey: next, remaining: rest });
-      } else {
-        await enqueue("score_titles", { draftId });
-      }
+    // Chain succession (A001 M-2, extended): a dead mid-pipeline stage must
+    // hand off to the next one. Without this, a single permanently failing
+    // stage silently kills every later stage — no staged posts, no
+    // package_ready notify, draft stuck as failed even though most of the
+    // package generated fine. Partial success is the design contract (§4).
+    //
+    // ai_improve_section is special-cased because it carries the `remaining`
+    // section list; every other stage has a fixed successor.
+    if (draftId !== null) {
+      await enqueueSuccessorStage(job.jobType, job.payload, draftId);
     }
     return;
   }
@@ -151,6 +146,44 @@ export async function failJob(id: number, error: string): Promise<void> {
     .update(jobs)
     .set({ status: "queued", lastError: error, runAfter })
     .where(eq(jobs.id, id));
+}
+
+/** Fixed successor for each mid-pipeline stage (mirrors the happy-path chain in lib/jobs/*). */
+export const SUCCESSOR_STAGE_FOR_TEST: Partial<Record<string, JobType>> = {
+  template_generate: "keyword_snapshot",
+  keyword_snapshot: "ai_improve_section",
+  score_titles: "stage_posts",
+  stage_posts: "notify",
+};
+
+async function enqueueSuccessorStage(
+  jobType: string,
+  payload: Record<string, unknown>,
+  draftId: number,
+): Promise<void> {
+  if (jobType === "ai_improve_section") {
+    const remaining = Array.isArray(payload.remaining) ? (payload.remaining as string[]) : [];
+    if (remaining.length > 0) {
+      const [next, ...rest] = remaining;
+      await enqueue("ai_improve_section", { draftId, sectionKey: next, remaining: rest });
+    } else {
+      await enqueue("score_titles", { draftId });
+    }
+    return;
+  }
+
+  const successor = SUCCESSOR_STAGE_FOR_TEST[jobType];
+  if (!successor) return; // notify / metrics_pull / outlier_pull: nothing follows
+
+  if (successor === "ai_improve_section") {
+    // Entering the section loop: start at the first section with the rest queued behind it.
+    const [first, ...rest] = AUTO_IMPROVE_SECTIONS;
+    await enqueue("ai_improve_section", { draftId, sectionKey: first, remaining: [...rest] });
+  } else if (successor === "notify") {
+    await enqueue("notify", { draftId, kind: "package_ready" });
+  } else {
+    await enqueue(successor as "keyword_snapshot" | "score_titles" | "stage_posts", { draftId });
+  }
 }
 
 // ─── Pure helpers (exported for unit testing without a live DB — see tests/queue.test.ts) ───

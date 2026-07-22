@@ -132,3 +132,22 @@ describe("fireWorker", () => {
     expect(() => fireWorker()).not.toThrow();
   });
 });
+
+describe("enqueueSuccessorStage — dead mid-pipeline stages hand off (A001 M-2 extended)", () => {
+  // A dead stage must not silently kill the rest of the pipeline. Verified here
+  // at the mapping level; the DB-write path needs a live Postgres (see WP3-V4).
+  it("maps every mid-pipeline stage to its happy-path successor", async () => {
+    const { SUCCESSOR_STAGE_FOR_TEST } = await import("@/lib/queue");
+    expect(SUCCESSOR_STAGE_FOR_TEST.template_generate).toBe("keyword_snapshot");
+    expect(SUCCESSOR_STAGE_FOR_TEST.keyword_snapshot).toBe("ai_improve_section");
+    expect(SUCCESSOR_STAGE_FOR_TEST.score_titles).toBe("stage_posts");
+    expect(SUCCESSOR_STAGE_FOR_TEST.stage_posts).toBe("notify");
+  });
+
+  it("has no successor for terminal or standalone jobs (no infinite chains)", async () => {
+    const { SUCCESSOR_STAGE_FOR_TEST } = await import("@/lib/queue");
+    expect(SUCCESSOR_STAGE_FOR_TEST.notify).toBeUndefined();
+    expect(SUCCESSOR_STAGE_FOR_TEST.metrics_pull).toBeUndefined();
+    expect(SUCCESSOR_STAGE_FOR_TEST.outlier_pull).toBeUndefined();
+  });
+});

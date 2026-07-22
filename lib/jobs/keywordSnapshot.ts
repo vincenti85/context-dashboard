@@ -1,16 +1,29 @@
 // lib/jobs/keywordSnapshot.ts — Pipeline stage 2: cached keyword evidence (M6).
 // Chain: enqueue(ai_improve_section, first of AUTO_IMPROVE_SECTIONS) on success.
-// Missing YOUTUBE_API_KEY is NOT a failure — the pipeline must not stall on an
-// optional integration the user hasn't configured yet (design §6.9).
+// Keyword evidence is ENRICHMENT: the pipeline must not stall on an optional
+// integration (design §6.9). That applies to a missing YOUTUBE_API_KEY *and*
+// to a key that the API rejects — a 403 (API not enabled / key restricted /
+// quota denied) will never succeed on retry, so it is skipped rather than
+// retried into a dead job. Transient errors (429, 5xx, network) still throw so
+// the queue retries them with backoff.
 
 import { eq, desc } from "drizzle-orm";
 import { db } from "@/db/client";
 import { drafts, keywordSnapshots } from "@/db/schema";
 import { fetchKeywordEvidence } from "@/lib/youtube/search";
+import { YoutubeApiError } from "@/lib/youtube/client";
 import { enqueue } from "@/lib/queue";
 import { AUTO_IMPROVE_SECTIONS } from "@/lib/ai/prompts";
 import { templateGenerate } from "@/lib/generator";
 import type { JobPayloadMap } from "@/lib/queue/types";
+
+/** 4xx other than 429 means the request will keep failing — retrying is pointless. */
+export function isPermanentYoutubeError(err: unknown): boolean {
+  if (!(err instanceof YoutubeApiError)) return false;
+  const status = err.status;
+  if (status === undefined) return true; // e.g. missing API key — configuration, not transient
+  return status >= 400 && status < 500 && status !== 429;
+}
 
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -43,8 +56,14 @@ export async function handleKeywordSnapshot(
     Date.now() - existing.fetchedAt.getTime() < CACHE_TTL_MS;
 
   if (!isFresh && process.env.YOUTUBE_API_KEY) {
-    const items = await fetchKeywordEvidence(keyword);
-    await db.insert(keywordSnapshots).values({ draftId, keyword, items });
+    try {
+      const items = await fetchKeywordEvidence(keyword);
+      await db.insert(keywordSnapshots).values({ draftId, keyword, items });
+    } catch (err) {
+      // Permanent config/permission failures: skip the evidence and let the
+      // package generate without it. Transient failures rethrow to be retried.
+      if (!isPermanentYoutubeError(err)) throw err;
+    }
   }
 
   const [firstSection, ...remaining] = AUTO_IMPROVE_SECTIONS;
