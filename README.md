@@ -27,13 +27,18 @@ npm run dev
 | `CRON_SECRET` | 필수 | `openssl rand -hex 32` | 워커/크론 엔드포인트 Bearer 토큰 |
 | `APP_URL` | 필수 | 배포 후 확정되는 Vercel URL | self-invoke 대상 |
 | `GOOGLE_GENERATIVE_AI_API_KEY` | 선택* | https://aistudio.google.com/apikey (카드 불필요, 무료 1,500회/일) | 없으면 AI 개선 단계가 건너뛰어짐(파이프라인은 계속 진행) |
-| `GROQ_API_KEY` | 선택* | https://console.groq.com/keys (카드 불필요, 무료 1,000회/일) | Gemini 실패 시 폴백 |
+| `GROQ_API_KEY` | 선택 | https://console.groq.com/keys (카드 불필요, 무료 1,000회/일) | Gemini 실패 시 폴백. 미설정 시 Gemini 단독 운영 |
 | `RESEND_API_KEY` | 선택 | https://resend.com/api-keys (무료 3,000통/월) | 없으면 이메일 알림 생략 |
 | `NOTIFY_EMAIL` | 선택 | 본인 이메일 | |
 | `YOUTUBE_API_KEY` | 선택 | Google Cloud Console → APIs & Services → 사용자 인증 정보 (API 키) | 없으면 키워드 검증/제목 스코어링 생략 |
 | `YOUTUBE_CLIENT_ID` / `_SECRET` / `_REFRESH_TOKEN` | 선택 (Should-tier) | Google Cloud Console → OAuth 클라이언트 | 메타데이터 적용·Analytics 수집용 |
 
 \* AI 키가 하나도 없으면 파이프라인은 템플릿 baseline만 생성하고 완료된다(오류 아님).
+
+AI provider 체인은 **실제로 설정된 키로만 구성**된다(`lib/ai/provider.ts#getModelChain`).
+따라서 `GROQ_API_KEY`를 비워두면 Gemini 단독으로 동작하며, 폴백을 시도하다
+"키 없음" 오류가 발생하는 일은 없다. 나중에 Groq 키를 추가하면 코드 변경 없이
+폴백이 활성화된다.
 
 ## 3. 데이터베이스 마이그레이션
 

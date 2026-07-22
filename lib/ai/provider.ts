@@ -10,7 +10,11 @@ import type { z } from "zod";
 
 export class AiUnavailableError extends Error {
   constructor(causes: string[]) {
-    super(`All AI providers failed: ${causes.join(" | ")}`);
+    super(
+      causes.length === 0
+        ? "No AI provider configured (set GOOGLE_GENERATIVE_AI_API_KEY and/or GROQ_API_KEY)"
+        : `All AI providers failed: ${causes.join(" | ")}`,
+    );
     this.name = "AiUnavailableError";
   }
 }
@@ -24,10 +28,31 @@ interface ChainEntry {
 // Stable (non-experimental) free-tier models. "gemini-flash-latest"-style
 // aliases point at experimental models with tighter rate limits — avoided
 // deliberately (see WP0 audit §V3).
-export const MODEL_CHAIN: ChainEntry[] = [
-  { id: "gemini-2.0-flash", provider: "google", model: () => google("gemini-2.0-flash") }, // free: 1,500 req/day
-  { id: "llama-3.3-70b-versatile", provider: "groq", model: () => groq("llama-3.3-70b-versatile") }, // free: 1,000 req/day fallback
+//
+// The chain is built from whichever provider keys are actually configured, so
+// an unused provider never produces a spurious "missing API key" failure when
+// the primary rate-limits. Adding GROQ_API_KEY re-enables the fallback with no
+// code change; with only Gemini configured the chain is simply one entry long.
+const ALL_CHAIN_ENTRIES: Array<ChainEntry & { envKey: string }> = [
+  {
+    id: "gemini-2.0-flash",
+    provider: "google",
+    envKey: "GOOGLE_GENERATIVE_AI_API_KEY",
+    model: () => google("gemini-2.0-flash"), // free: 1,500 req/day
+  },
+  {
+    id: "llama-3.3-70b-versatile",
+    provider: "groq",
+    envKey: "GROQ_API_KEY",
+    model: () => groq("llama-3.3-70b-versatile"), // free: 1,000 req/day fallback
+  },
 ];
+
+/** Providers whose API key is present, in priority order. Read per call so
+ * tests and runtime env changes are picked up without a module reload. */
+export function getModelChain(): ChainEntry[] {
+  return ALL_CHAIN_ENTRIES.filter((entry) => Boolean(process.env[entry.envKey]));
+}
 
 const PER_PROVIDER_TIMEOUT_MS = 30_000;
 
@@ -68,7 +93,7 @@ export async function generateWithFallback(
   opts: GenerateWithFallbackOptions,
 ): Promise<GenerateWithFallbackResult> {
   const failures: string[] = [];
-  for (const entry of MODEL_CHAIN) {
+  for (const entry of getModelChain()) {
     try {
       const { text } = await withTimeout(
         generateText({
@@ -108,7 +133,7 @@ export async function generateObjectWithFallback<T>(
   opts: GenerateObjectWithFallbackOptions<T>,
 ): Promise<GenerateObjectWithFallbackResult<T>> {
   const failures: string[] = [];
-  for (const entry of MODEL_CHAIN) {
+  for (const entry of getModelChain()) {
     try {
       const { object } = await withTimeout(
         generateObject({
