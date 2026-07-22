@@ -19,10 +19,26 @@ import { NextRequest, NextResponse } from "next/server";
 // re-running this flow to mint a new refresh token.
 const SCOPES = ["https://www.googleapis.com/auth/yt-analytics.readonly"].join(" ");
 
+/**
+ * Describes a secret's shape without revealing it, so an invalid_client can be
+ * told apart from a copy-paste accident. Google client secrets look like
+ * "GOCSPX-" + 28 chars; a trailing newline from a paste is a common cause.
+ */
+function describeSecretShape(raw: string, trimmed: string): string {
+  return [
+    `length=${trimmed.length}`,
+    `hadSurroundingWhitespace=${raw !== trimmed}`,
+    `startsWithGOCSPX=${trimmed.startsWith("GOCSPX-")}`,
+  ].join(", ");
+}
+
 export async function GET(request: NextRequest) {
-  const clientId = process.env.YOUTUBE_CLIENT_ID;
-  const clientSecret = process.env.YOUTUBE_CLIENT_SECRET;
-  const appUrl = process.env.APP_URL;
+  // Trim: Vercel's env editor readily keeps a trailing newline, and Google
+  // rejects the secret with a bare "invalid_client" that names no cause.
+  const clientId = process.env.YOUTUBE_CLIENT_ID?.trim();
+  const rawSecret = process.env.YOUTUBE_CLIENT_SECRET;
+  const clientSecret = rawSecret?.trim();
+  const appUrl = process.env.APP_URL?.trim();
 
   if (!clientId || !clientSecret || !appUrl) {
     return NextResponse.json(
@@ -59,7 +75,16 @@ export async function GET(request: NextRequest) {
 
   if (!tokenRes.ok) {
     const errorText = await tokenRes.text();
-    return NextResponse.json({ error: `token exchange failed: ${errorText}` }, { status: 500 });
+    // invalid_client names no cause, so add the secret's shape (never its
+    // value) — that distinguishes a bad paste from a genuinely wrong secret.
+    const hint = errorText.includes("invalid_client")
+      ? ` | YOUTUBE_CLIENT_SECRET shape: ${describeSecretShape(rawSecret ?? "", clientSecret)}` +
+        ` | clientId ends with: ...${clientId.slice(-24)}`
+      : "";
+    return NextResponse.json(
+      { error: `token exchange failed: ${errorText}${hint}` },
+      { status: 500 },
+    );
   }
 
   const tokens = (await tokenRes.json()) as { refresh_token?: string; access_token: string };
