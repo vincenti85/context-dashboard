@@ -334,7 +334,35 @@ export async function updatePostStatus(
   revalidatePath("/drafts");
 }
 
-// ─── YouTube metadata apply (S1) ────────────────────────────────
+// ─── Link a published video to a draft (S2 prerequisite) ────────
+// metrics_pull only collects for drafts that carry a youtube_video_id, so this
+// is what makes the performance feedback loop possible. Deliberately does NOT
+// call the YouTube API: the deployed OAuth token holds the read-only Analytics
+// scope, and linking is a local bookkeeping operation.
+
+export async function linkYoutubeVideo(draftId: number, youtubeVideoId: string) {
+  await requireAdmin();
+
+  const trimmed = youtubeVideoId.trim();
+  // Accept a bare ID or a full watch/share URL — pasting the URL straight from
+  // the address bar is the obvious thing to do.
+  const parsed =
+    trimmed.match(/(?:v=|youtu\.be\/|\/shorts\/)([A-Za-z0-9_-]{11})/)?.[1] ?? trimmed;
+  if (!/^[A-Za-z0-9_-]{11}$/.test(parsed)) {
+    throw new Error("YouTube 영상 ID 형식이 아닙니다 (11자). 영상 URL을 붙여넣어도 됩니다.");
+  }
+
+  await db.update(drafts).set({ youtubeVideoId: parsed }).where(eq(drafts.id, draftId));
+  revalidatePath(`/drafts/${draftId}`);
+  return parsed;
+}
+
+// ─── YouTube metadata apply (S1 — NOT ENABLED) ──────────────────
+// Kept for a future opt-in: the deployed OAuth token is Analytics-read-only,
+// so this would fail with insufficient scope. Enabling S1 means adding
+// https://www.googleapis.com/auth/youtube to app/api/youtube/oauth SCOPES,
+// re-running that flow, and surfacing this action in the UI again.
+//
 // SAFETY: this is the ONLY call site for applyMetadata() in the whole app —
 // it must never be invoked from an automatic pipeline job. Guard verified in
 // WP9-V2: `grep -r "applyMetadata" lib/jobs/` must return 0 matches.

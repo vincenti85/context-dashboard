@@ -31,7 +31,7 @@ npm run dev
 | `RESEND_API_KEY` | 선택 | https://resend.com/api-keys (무료 3,000통/월) | 없으면 이메일 알림 생략 |
 | `NOTIFY_EMAIL` | 선택 | 본인 이메일 | |
 | `YOUTUBE_API_KEY` | 선택 | Google Cloud Console → APIs & Services → 사용자 인증 정보 (API 키) | 없으면 키워드 검증/제목 스코어링 생략 |
-| `YOUTUBE_CLIENT_ID` / `_SECRET` / `_REFRESH_TOKEN` | 선택 (Should-tier) | Google Cloud Console → OAuth 클라이언트 | 메타데이터 적용·Analytics 수집용 |
+| `YOUTUBE_CLIENT_ID` / `_SECRET` / `_REFRESH_TOKEN` | 선택 (S2) | Google Cloud Console → OAuth 클라이언트 | 성과(Analytics) 수집용. 없으면 metrics_pull이 건너뜀 |
 
 \* AI 키가 하나도 없으면 파이프라인은 템플릿 baseline만 생성하고 완료된다(오류 아님).
 
@@ -111,9 +111,7 @@ Neon Postgres는 Vercel Marketplace 통합(Storage 탭)으로 연결하는 것�
 - [ ] Gemini(`gemini-3.5-flash`)/Groq(`llama-3.3-70b-versatile`) 무료 티어가
       실제 한국어 콘텐츠 개선에 충분한 품질을 내는지 (섹션 몇 개를 실제 생성해
       수동 비교)
-- [ ] YouTube OAuth 리프레시 토큰 발급 절차 (Google Cloud Console에서 OAuth
-      클라이언트 생성 → 동의 화면 구성 → `https://developers.google.com/oauthplayground`
-      또는 자체 스크립트로 1회 인증 후 refresh_token 확보)
+- [ ] YouTube OAuth 리프레시 토큰 발급 (아래 §9 참고)
 - [ ] cron-job.org 1분 주기 호출의 24시간 성공률
 
 ## 8. 이 구현이 아직 하지 않는 것 (범위 밖, `Won't`)
@@ -125,3 +123,43 @@ Neon Postgres는 Vercel Marketplace 통합(Storage 탭)으로 연결하는 것�
 - YouTube API 쿼터 증설 신청 — 개인 채널 기본 쿼터로 충분하다는 전제.
 
 전체 범위 정의: `docs/superpowers/specs/2026-07-05-integrated-system-design.md` §3
+
+## 9. YouTube 성과 수집(S2) 연동
+
+영상 성과를 매일 수집해 `channel_profile.provenPatterns`에 반영하는 피드백
+루프다. 연동하지 않아도 나머지 파이프라인은 정상 동작한다.
+
+### 9.1 Google Cloud 설정
+
+1. **YouTube Analytics API 활성화** — APIs & Services → Library →
+   `YouTube Analytics API` → Enable (Data API와 별개의 API다)
+2. **OAuth 동의 화면** — External 선택, 앱 이름·지원 이메일 입력
+3. **동의 화면을 반드시 "In Production"으로 게시** ⚠️
+   Testing 상태로 두면 Google이 **refresh token을 7일 후 만료**시켜 매주
+   재인증해야 한다. 게시하면 토큰이 영구화된다. 심사(verification) 없이도
+   게시할 수 있으며, 최초 인증 시 "확인되지 않은 앱" 경고에서
+   **고급 → 이동(안전하지 않음)** 을 누르면 된다.
+4. **OAuth 클라이언트 ID 생성** — 유형: 웹 애플리케이션,
+   승인된 리디렉션 URI에 `{APP_URL}/api/youtube/oauth` 추가
+
+### 9.2 리프레시 토큰 발급
+
+1. Vercel에 `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET` 설정 후 재배포
+2. **대시보드에 로그인한 상태로** `{APP_URL}/api/youtube/oauth` 접속
+   (이 경로는 관리자 쿠키로 보호된다)
+3. Google 동의 후 화면에 표시된 refresh token을 복사
+4. `YOUTUBE_REFRESH_TOKEN`으로 Vercel에 저장 → 재배포
+
+요청 스코프는 `yt-analytics.readonly` **하나뿐**이다. 영상 메타데이터 자동
+적용(S1)은 쓰지 않기로 해 쓰기 권한(`.../auth/youtube`)을 요청하지 않는다.
+나중에 S1을 켜려면 `app/api/youtube/oauth/route.ts`의 `SCOPES`에 쓰기 스코프를
+추가하고 위 절차를 다시 실행해 토큰을 새로 발급해야 한다.
+
+### 9.3 사용 방법
+
+영상을 업로드한 뒤 해당 드래프트의 **게시 준비** 탭에서 **업로드한 영상 연결**에
+영상 URL(또는 ID)을 입력한다. 이후 매일 1회 `metrics_pull`이 그 영상의
+조회수·평균 시청 시간을 수집하고, 상위 성과 콘텐츠가 채널 프로필의
+`provenPatterns`에 반영되어 이후 생성 프롬프트에 포함된다.
+
+영상 ID를 연결하지 않으면 수집 대상이 없어 아무 일도 일어나지 않는다.

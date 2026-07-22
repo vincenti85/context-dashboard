@@ -13,7 +13,7 @@ import { GenerationControl } from "@/components/GenerationControl";
 import { PipelineStatus } from "@/components/PipelineStatus";
 import { KeywordEvidence } from "@/components/KeywordEvidence";
 import { PostsStaging } from "@/components/PostsStaging";
-import { YoutubeMetadataApply } from "@/components/YoutubeMetadataApply";
+import { YoutubeVideoLink } from "@/components/YoutubeVideoLink";
 import { parseAiOverrides } from "@/lib/export";
 import { assembleDocument } from "@/lib/export";
 import { notFound } from "next/navigation";
@@ -85,7 +85,7 @@ export default async function EditorPage({
                   label: "게시 준비",
                   content: (
                     <div className="space-y-4">
-                      <YoutubeMetadataApply
+                      <YoutubeVideoLink
                         draftId={draftId}
                         currentVideoId={draft.youtubeVideoId}
                       />

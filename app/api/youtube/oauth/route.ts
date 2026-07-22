@@ -1,6 +1,6 @@
-// app/api/youtube/oauth/route.ts — One-time OAuth setup flow for YouTube
-// videos.update (S1) + Analytics API (S2). Admin-only (protected by middleware's
-// default cookie check — this path is NOT in the public/bearer allowlist).
+// app/api/youtube/oauth/route.ts — One-time OAuth setup flow for the YouTube
+// Analytics API (S2). Admin-only (protected by middleware's default cookie
+// check — this path is NOT in the public/bearer allowlist).
 //
 // Flow:
 //  1. GET with no `code` -> redirect to Google's consent screen.
@@ -11,10 +11,13 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
-const SCOPES = [
-  "https://www.googleapis.com/auth/youtube", // videos.update (S1)
-  "https://www.googleapis.com/auth/yt-analytics.readonly", // Analytics reports.query (S2)
-].join(" ");
+// Read-only Analytics scope only. The write scope
+// (https://www.googleapis.com/auth/youtube) that videos.update needs is
+// deliberately NOT requested: metadata is copied by hand from the 게시 준비
+// tab, so granting this token write access to the channel would be permission
+// we never exercise. Adding S1 later means adding that scope here and
+// re-running this flow to mint a new refresh token.
+const SCOPES = ["https://www.googleapis.com/auth/yt-analytics.readonly"].join(" ");
 
 export async function GET(request: NextRequest) {
   const clientId = process.env.YOUTUBE_CLIENT_ID;
