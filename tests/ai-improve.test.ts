@@ -49,7 +49,7 @@ describe("aiImprove — title/thumbnail override header contract (A001 B-2)", ()
     generateObjectWithFallbackMock.mockReset();
     generateObjectWithFallbackMock.mockResolvedValue({
       object: { items: ["새 제목 1", "새 제목 2", "새 제목 3", "새 제목 4", "새 제목 5"] },
-      modelUsed: "gemini-2.0-flash",
+      modelUsed: "gemini-3.5-flash",
     });
   });
 
@@ -106,7 +106,7 @@ describe("aiImprove — free-text path structural validation still enforced", ()
   it("rejects a response whose headers differ (structure_violation)", async () => {
     generateWithFallbackMock.mockResolvedValue({
       text: "## 완전히 다른 헤더\n\n내용",
-      modelUsed: "gemini-2.0-flash",
+      modelUsed: "gemini-3.5-flash",
     });
     const { aiImprove } = await import("@/lib/ai/improve");
     const sectionChunk = extractSectionChunk(BASELINE_DOC, "4. 영상 설명란")!;
@@ -120,7 +120,7 @@ describe("aiImprove — free-text path structural validation still enforced", ()
   it("accepts a response with identical headers", async () => {
     generateWithFallbackMock.mockResolvedValue({
       text: "## 4. 영상 설명란\n\n개선된 설명란 본문",
-      modelUsed: "gemini-2.0-flash",
+      modelUsed: "gemini-3.5-flash",
     });
     const { aiImprove } = await import("@/lib/ai/improve");
     const sectionChunk = extractSectionChunk(BASELINE_DOC, "4. 영상 설명란")!;

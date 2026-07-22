@@ -108,7 +108,7 @@ Neon Postgres는 Vercel Marketplace 통합(Storage 탭)으로 연결하는 것�
 - [ ] Vercel Cron이 `CRON_SECRET`을 자동으로 `Authorization: Bearer` 헤더로
       보내는지, 아니면 별도 설정이 필요한지 (배포 시점의 Vercel Cron Jobs 공식
       문서로 확인)
-- [ ] Gemini(`gemini-2.0-flash`)/Groq(`llama-3.3-70b-versatile`) 무료 티어가
+- [ ] Gemini(`gemini-3.5-flash`)/Groq(`llama-3.3-70b-versatile`) 무료 티어가
       실제 한국어 콘텐츠 개선에 충분한 품질을 내는지 (섹션 몇 개를 실제 생성해
       수동 비교)
 - [ ] YouTube OAuth 리프레시 토큰 발급 절차 (Google Cloud Console에서 OAuth

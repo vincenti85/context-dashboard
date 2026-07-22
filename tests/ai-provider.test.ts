@@ -59,7 +59,7 @@ describe("generateWithFallback", () => {
 
     const result = await generateWithFallback({ system: "s", prompt: "p" });
 
-    expect(result).toEqual({ text: "hello from gemini", modelUsed: "gemini-2.0-flash" });
+    expect(result).toEqual({ text: "hello from gemini", modelUsed: "gemini-3.5-flash" });
     expect(generateTextMock).toHaveBeenCalledTimes(1);
   });
 
@@ -147,7 +147,7 @@ describe("getModelChain — built from configured provider keys", () => {
     const { getModelChain } = await import("@/lib/ai/provider");
 
     expect(getModelChain().map((e) => e.id)).toEqual([
-      "gemini-2.0-flash",
+      "gemini-3.5-flash",
       "llama-3.3-70b-versatile",
     ]);
   });
@@ -157,7 +157,7 @@ describe("getModelChain — built from configured provider keys", () => {
     delete process.env.GROQ_API_KEY;
     const { getModelChain } = await import("@/lib/ai/provider");
 
-    expect(getModelChain().map((e) => e.id)).toEqual(["gemini-2.0-flash"]);
+    expect(getModelChain().map((e) => e.id)).toEqual(["gemini-3.5-flash"]);
   });
 
   it("does not attempt a Groq call when Gemini rate-limits and Groq is unconfigured", async () => {

@@ -33,18 +33,27 @@ interface ChainEntry {
 // an unused provider never produces a spurious "missing API key" failure when
 // the primary rate-limits. Adding GROQ_API_KEY re-enables the fallback with no
 // code change; with only Gemini configured the chain is simply one entry long.
+// Model IDs are overridable by env so a provider retiring a model is a config
+// change, not a redeploy. This is not hypothetical: gemini-2.0-flash (chosen in
+// the WP0 audit as the "stable" option) was shut down on 2026-06-01 and broke
+// the pipeline in production. gemini-3.5-flash is the current free-tier default
+// (1,500 req/day) and has no announced shutdown date, unlike gemini-2.5-flash
+// which is scheduled to cut over on 2026-10-16.
+const GEMINI_MODEL = process.env.GEMINI_MODEL_ID || "gemini-3.5-flash";
+const GROQ_MODEL = process.env.GROQ_MODEL_ID || "llama-3.3-70b-versatile";
+
 const ALL_CHAIN_ENTRIES: Array<ChainEntry & { envKey: string }> = [
   {
-    id: "gemini-2.0-flash",
+    id: GEMINI_MODEL,
     provider: "google",
     envKey: "GOOGLE_GENERATIVE_AI_API_KEY",
-    model: () => google("gemini-2.0-flash"), // free: 1,500 req/day
+    model: () => google(GEMINI_MODEL), // free: 1,500 req/day
   },
   {
-    id: "llama-3.3-70b-versatile",
+    id: GROQ_MODEL,
     provider: "groq",
     envKey: "GROQ_API_KEY",
-    model: () => groq("llama-3.3-70b-versatile"), // free: 1,000 req/day fallback
+    model: () => groq(GROQ_MODEL), // free: 1,000 req/day fallback
   },
 ];
 
