@@ -90,7 +90,7 @@ async function verifySetup(): Promise<NextResponse> {
         step: message.includes("token refresh") ? "token_refresh" : "analytics_query",
         error: message,
         hint: message.includes("403")
-          ? "403 here usually means the YouTube Analytics API is not enabled on the project, or the token lacks yt-analytics.readonly."
+          ? "403 has three causes, in rough order of likelihood: (1) the signed-in Google account owns no YouTube channel — channel==MINE cannot resolve, and no amount of configuration fixes it until a channel exists; (2) the YouTube Analytics API is not enabled on the project; (3) the token lacks yt-analytics.readonly."
           : message.includes("invalid_grant")
             ? "invalid_grant means the refresh token expired or was revoked — publish the consent screen to In production and re-run this flow."
             : undefined,
