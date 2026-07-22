@@ -36,7 +36,20 @@ function NewDraftForm() {
 
   return (
     <div className="max-w-3xl space-y-6">
-      <h2 className="text-xl font-semibold">새 드래프트</h2>
+      <div className="flex items-start justify-between">
+        <div>
+          <h2 className="text-xl font-semibold">새 드래프트</h2>
+          <p className="mt-1 text-sm text-text-muted">
+            저장하면 2~3분 뒤 패키지가 완성되고 메일이 옵니다.
+          </p>
+        </div>
+        <a
+          href="/guide"
+          className="rounded-md border border-border px-3 py-1.5 text-sm text-text-muted transition-colors hover:text-text"
+        >
+          작성 형식 보기
+        </a>
+      </div>
 
       <div className="space-y-4">
         <div>

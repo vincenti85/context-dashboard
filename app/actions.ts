@@ -430,6 +430,67 @@ export async function getKeywordEvidence(draftId: number) {
   return snapshot ?? null;
 }
 
+// ─── System status (guide page) ─────────────────────────────────
+// Reports which integrations are wired up. Env values are read server-side and
+// only their presence is returned — never the values themselves.
+
+export interface IntegrationStatus {
+  key: string;
+  label: string;
+  configured: boolean;
+  required: boolean;
+  /** What stops working when this is missing. */
+  impact: string;
+}
+
+export async function getSystemStatus(): Promise<{
+  integrations: IntegrationStatus[];
+  channelProfileSet: boolean;
+  pendingJobs: number;
+  deadJobs: number;
+  lastJobAt: string | null;
+}> {
+  const has = (k: string) => Boolean(process.env[k]?.trim());
+
+  const integrations: IntegrationStatus[] = [
+    { key: "DATABASE_URL", label: "데이터베이스 (Neon)", configured: has("DATABASE_URL"), required: true,
+      impact: "없으면 대시보드 자체가 동작하지 않습니다." },
+    { key: "CRON_SECRET", label: "워커 인증 토큰", configured: has("CRON_SECRET"), required: true,
+      impact: "없으면 자동 파이프라인이 전혀 실행되지 않습니다." },
+    { key: "APP_URL", label: "앱 주소", configured: has("APP_URL"), required: true,
+      impact: "없으면 저장 직후 즉시 처리(self-invoke)가 동작하지 않습니다." },
+    { key: "GOOGLE_GENERATIVE_AI_API_KEY", label: "AI 생성 (Gemini)", configured: has("GOOGLE_GENERATIVE_AI_API_KEY"), required: false,
+      impact: "없으면 AI 개선 없이 템플릿 기본안만 생성됩니다." },
+    { key: "GROQ_API_KEY", label: "AI 폴백 (Groq)", configured: has("GROQ_API_KEY"), required: false,
+      impact: "선택 사항입니다. Gemini 실패 시 대체 경로로만 쓰입니다." },
+    { key: "YOUTUBE_API_KEY", label: "키워드 검증 (YouTube Data)", configured: has("YOUTUBE_API_KEY"), required: false,
+      impact: "없으면 경쟁 영상 근거와 제목 순위가 비어 있습니다." },
+    { key: "YOUTUBE_REFRESH_TOKEN", label: "성과 수집 (YouTube Analytics)", configured: has("YOUTUBE_REFRESH_TOKEN"), required: false,
+      impact: "없으면 조회수 기반 피드백 루프가 동작하지 않습니다." },
+    { key: "RESEND_API_KEY", label: "이메일 알림 (Resend)", configured: has("RESEND_API_KEY"), required: false,
+      impact: "없으면 완료·실패 알림 메일이 오지 않습니다(파이프라인은 정상)." },
+  ];
+
+  const [profile] = await db.select().from(channelProfile).limit(1);
+
+  const counts = await db.execute(sql`
+    SELECT
+      count(*) FILTER (WHERE status IN ('queued','running')) AS pending,
+      count(*) FILTER (WHERE status = 'dead') AS dead,
+      max(created_at) AS last_at
+    FROM jobs
+  `);
+  const row = counts.rows[0] as { pending: string; dead: string; last_at: string | null };
+
+  return {
+    integrations,
+    channelProfileSet: Boolean(profile),
+    pendingJobs: Number(row?.pending ?? 0),
+    deadJobs: Number(row?.dead ?? 0),
+    lastJobAt: row?.last_at ?? null,
+  };
+}
+
 // ─── Next content ideas (C1, performance-fed) ──────────────────
 
 const IDEA_ANGLES = [

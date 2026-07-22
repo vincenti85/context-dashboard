@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const NAV_ITEMS = [
   { href: "/", label: "개요" },
   { href: "/drafts", label: "드래프트" },
+  { href: "/guide", label: "활용 가이드" },
   { href: "/settings", label: "설정" },
 ];
 
