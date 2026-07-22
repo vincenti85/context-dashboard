@@ -96,7 +96,20 @@ async function getAccessToken(): Promise<string> {
     }),
   });
   if (!res.ok) {
-    throw new YoutubeApiError(`YouTube OAuth token refresh failed: ${res.status}`, res.status);
+    // Google's token endpoint uses `error`/`error_description` rather than the
+    // error.errors[] shape describeFailure() reads, so parse it here.
+    let detail = "";
+    try {
+      const body = (await res.json()) as { error?: string; error_description?: string };
+      if (body.error) detail = ` (${body.error})`;
+      if (body.error_description) detail += ` — ${body.error_description}`;
+    } catch {
+      // Non-JSON body: status alone.
+    }
+    throw new YoutubeApiError(
+      `YouTube OAuth token refresh failed: ${res.status}${detail}`,
+      res.status,
+    );
   }
   const data = (await res.json()) as { access_token: string; expires_in: number };
   cachedToken = { accessToken: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
@@ -116,10 +129,12 @@ export async function ytOAuth<T>(
       ...(init.headers as Record<string, string> | undefined),
       authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
-    },
+    } as Record<string, string>,
   });
   if (!res.ok) {
-    throw new YoutubeApiError(`YouTube OAuth API ${path} failed: ${res.status}`, res.status);
+    // Same reason-extraction as the API-key path: a bare status on this path
+    // left the Analytics 403 undiagnosable during setup.
+    throw await describeFailure(res, path);
   }
   return res.json() as Promise<T>;
 }
