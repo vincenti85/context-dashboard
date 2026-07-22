@@ -10,6 +10,7 @@
 //     and redeploy; see README.md §7).
 
 import { NextRequest, NextResponse } from "next/server";
+import { ytOAuth, YT_ANALYTICS_BASE } from "@/lib/youtube/client";
 
 // Read-only Analytics scope only. The write scope
 // (https://www.googleapis.com/auth/youtube) that videos.update needs is
@@ -32,6 +33,73 @@ function describeSecretShape(raw: string, trimmed: string): string {
   ].join(", ");
 }
 
+interface AnalyticsProbeResponse {
+  rows?: unknown[][];
+  columnHeaders?: Array<{ name: string }>;
+}
+
+/**
+ * Exercises the whole stored chain: refresh token -> access token -> a minimal
+ * channel-level Analytics query. Reports which link broke rather than a bare
+ * failure, since each has a different fix (expired token vs missing scope vs
+ * Analytics API not enabled).
+ */
+async function verifySetup(): Promise<NextResponse> {
+  if (!process.env.YOUTUBE_REFRESH_TOKEN?.trim()) {
+    return NextResponse.json(
+      { ok: false, step: "config", error: "YOUTUBE_REFRESH_TOKEN is not set" },
+      { status: 500 },
+    );
+  }
+
+  // Yesterday..today in UTC — Analytics data lags, so a single recent day can
+  // legitimately be empty; the point here is that the call is *authorized*.
+  const today = new Date();
+  const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
+  const params = new URLSearchParams({
+    ids: "channel==MINE",
+    startDate: fmt(weekAgo),
+    endDate: fmt(today),
+    metrics: "views",
+  });
+
+  try {
+    const res = await ytOAuth<AnalyticsProbeResponse>(
+      `reports?${params.toString()}`,
+      {},
+      YT_ANALYTICS_BASE,
+    );
+    const views = Number(res.rows?.[0]?.[0] ?? 0);
+    return NextResponse.json({
+      ok: true,
+      message: "Refresh token, Analytics scope and API access all working.",
+      window: `${fmt(weekAgo)} ~ ${fmt(today)}`,
+      channelViewsInWindow: views,
+      note:
+        views === 0
+          ? "0 views is expected if the channel has no published videos yet — authorization still succeeded."
+          : undefined,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json(
+      {
+        ok: false,
+        step: message.includes("token refresh") ? "token_refresh" : "analytics_query",
+        error: message,
+        hint: message.includes("403")
+          ? "403 here usually means the YouTube Analytics API is not enabled on the project, or the token lacks yt-analytics.readonly."
+          : message.includes("invalid_grant")
+            ? "invalid_grant means the refresh token expired or was revoked — publish the consent screen to In production and re-run this flow."
+            : undefined,
+      },
+      { status: 500 },
+    );
+  }
+}
+
 export async function GET(request: NextRequest) {
   // Trim: Vercel's env editor readily keeps a trailing newline, and Google
   // rejects the secret with a bare "invalid_client" that names no cause.
@@ -45,6 +113,13 @@ export async function GET(request: NextRequest) {
       { error: "YOUTUBE_CLIENT_ID / YOUTUBE_CLIENT_SECRET / APP_URL must be set first" },
       { status: 500 },
     );
+  }
+
+  // ?verify=1 — end-to-end check of the stored setup. Without it a broken
+  // token stays invisible until the daily metrics_pull runs, and even then
+  // only once a video has been linked (that job returns early otherwise).
+  if (request.nextUrl.searchParams.get("verify")) {
+    return verifySetup();
   }
 
   const redirectUri = `${appUrl}/api/youtube/oauth`;
