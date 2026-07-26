@@ -187,6 +187,184 @@ export const videoMetrics = pgTable(
   (t) => [uniqueIndex("video_metrics_video_day_idx").on(t.youtubeVideoId, t.day)],
 );
 
+// Financial reporting is intentionally isolated from drafts/generations. It
+// shares infrastructure (Neon, jobs) but has its own version and audit chain.
+export const reportTemplates = pgTable(
+  "report_templates",
+  {
+    id: serial("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    name: text("name").notNull(),
+    version: integer("version").notNull().default(1),
+    sectionSchema: jsonb("section_schema").notNull().$type<Record<string, unknown>>(),
+    status: text("status").notNull().default("active"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("report_templates_workspace_name_version_idx").on(
+    t.workspaceId,
+    t.name,
+    t.version,
+  )],
+);
+
+export const reports = pgTable(
+  "reports",
+  {
+    id: serial("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    companyKey: text("company_key").notNull(),
+    period: text("period").notNull(),
+    templateId: integer("template_id")
+      .notNull()
+      .references(() => reportTemplates.id),
+    status: text("status").notNull().default("draft"),
+    currentVersionId: integer("current_version_id"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    publishedAt: timestamp("published_at"),
+  },
+  (t) => [uniqueIndex("reports_workspace_company_period_idx").on(
+    t.workspaceId,
+    t.companyKey,
+    t.period,
+  )],
+);
+
+export const reportVersions = pgTable(
+  "report_versions",
+  {
+    id: serial("id").primaryKey(),
+    reportId: integer("report_id")
+      .notNull()
+      .references(() => reports.id, { onDelete: "cascade" }),
+    parentVersionId: integer("parent_version_id"),
+    versionNo: integer("version_no").notNull(),
+    status: text("status").notNull().default("draft"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    lockedAt: timestamp("locked_at"),
+  },
+  (t) => [uniqueIndex("report_versions_report_version_idx").on(t.reportId, t.versionNo)],
+);
+
+export const reportSections = pgTable(
+  "report_sections",
+  {
+    id: serial("id").primaryKey(),
+    reportVersionId: integer("report_version_id")
+      .notNull()
+      .references(() => reportVersions.id, { onDelete: "cascade" }),
+    sectionKey: text("section_key").notNull(),
+    title: text("title").notNull(),
+    bodyMarkdown: text("body_markdown").notNull().default(""),
+    ownerId: text("owner_id"),
+    status: text("status").notNull().default("draft"),
+    approvedBy: text("approved_by"),
+    approvedAt: timestamp("approved_at"),
+  },
+  (t) => [uniqueIndex("report_sections_version_key_idx").on(t.reportVersionId, t.sectionKey)],
+);
+
+export const sourceSnapshots = pgTable(
+  "source_snapshots",
+  {
+    id: serial("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    sourceType: text("source_type").notNull(),
+    name: text("name").notNull(),
+    effectiveAt: timestamp("effective_at").notNull(),
+    objectUri: text("object_uri"),
+    checksum: text("checksum").notNull(),
+    sourceSchema: jsonb("source_schema").$type<Record<string, unknown>>(),
+    importedBy: text("imported_by").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("source_snapshots_workspace_checksum_idx").on(
+    t.workspaceId,
+    t.checksum,
+  )],
+);
+
+export const reportMetrics = pgTable(
+  "report_metrics",
+  {
+    id: serial("id").primaryKey(),
+    sourceSnapshotId: integer("source_snapshot_id")
+      .notNull()
+      .references(() => sourceSnapshots.id, { onDelete: "cascade" }),
+    metricKey: text("metric_key").notNull(),
+    label: text("label").notNull(),
+    period: text("period").notNull(),
+    amountDecimal: text("amount_decimal").notNull(),
+    unit: text("unit").notNull(),
+    sourceLocator: jsonb("source_locator").notNull().$type<Record<string, unknown>>(),
+  },
+  (t) => [uniqueIndex("report_metrics_snapshot_key_period_idx").on(
+    t.sourceSnapshotId,
+    t.metricKey,
+    t.period,
+  )],
+);
+
+export const reportMetricLinks = pgTable(
+  "report_metric_links",
+  {
+    id: serial("id").primaryKey(),
+    reportSectionId: integer("report_section_id")
+      .notNull()
+      .references(() => reportSections.id, { onDelete: "cascade" }),
+    metricId: integer("metric_id")
+      .notNull()
+      .references(() => reportMetrics.id),
+    token: text("token").notNull(),
+    displayFormat: text("display_format").notNull(),
+    sourceChecksum: text("source_checksum").notNull(),
+    status: text("status").notNull().default("current"),
+  },
+  (t) => [uniqueIndex("report_metric_links_section_token_idx").on(
+    t.reportSectionId,
+    t.token,
+  )],
+);
+
+export const reportComments = pgTable("report_comments", {
+  id: serial("id").primaryKey(),
+  reportSectionId: integer("report_section_id")
+    .notNull()
+    .references(() => reportSections.id, { onDelete: "cascade" }),
+  anchor: text("anchor"),
+  body: text("body").notNull(),
+  authorId: text("author_id").notNull(),
+  status: text("status").notNull().default("open"),
+  resolvedBy: text("resolved_by"),
+  resolvedAt: timestamp("resolved_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const reportExports = pgTable("report_exports", {
+  id: serial("id").primaryKey(),
+  reportVersionId: integer("report_version_id")
+    .notNull()
+    .references(() => reportVersions.id, { onDelete: "cascade" }),
+  format: text("format").notNull(),
+  objectUri: text("object_uri"),
+  checksum: text("checksum").notNull(),
+  manifest: jsonb("manifest").notNull().$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const reportAuditEvents = pgTable("report_audit_events", {
+  id: serial("id").primaryKey(),
+  reportId: integer("report_id")
+    .notNull()
+    .references(() => reports.id, { onDelete: "cascade" }),
+  reportVersionId: integer("report_version_id").references(() => reportVersions.id),
+  action: text("action").notNull(),
+  actorId: text("actor_id").notNull(),
+  detail: jsonb("detail").notNull().$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export type Draft = typeof drafts.$inferSelect;
 export type NewDraft = typeof drafts.$inferInsert;
 export type Generation = typeof generations.$inferSelect;
@@ -205,3 +383,13 @@ export type VideoMetric = typeof videoMetrics.$inferSelect;
 export type NewVideoMetric = typeof videoMetrics.$inferInsert;
 export type OutlierSnapshot = typeof outlierSnapshots.$inferSelect;
 export type NewOutlierSnapshot = typeof outlierSnapshots.$inferInsert;
+export type Report = typeof reports.$inferSelect;
+export type NewReport = typeof reports.$inferInsert;
+export type ReportVersion = typeof reportVersions.$inferSelect;
+export type NewReportVersion = typeof reportVersions.$inferInsert;
+export type ReportSection = typeof reportSections.$inferSelect;
+export type NewReportSection = typeof reportSections.$inferInsert;
+export type SourceSnapshot = typeof sourceSnapshots.$inferSelect;
+export type NewSourceSnapshot = typeof sourceSnapshots.$inferInsert;
+export type ReportMetric = typeof reportMetrics.$inferSelect;
+export type NewReportMetric = typeof reportMetrics.$inferInsert;
